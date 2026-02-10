@@ -6,6 +6,10 @@
 """Sub-package with environment wrappers for Isaac Lab Mimic."""
 
 import gymnasium as gym
+from .franka_stack_ik_rel_visuomotor_mimic_env_cfg import FrankaCubeStackIKRelVisuomotorMimicEnvCfg
+from .tm7s_stack_ik_rel_mimic_env import TM7SCubeStackIKRelMimicEnv
+from .tm7s_stack_ik_rel_mimic_env_cfg import TM7SCubeStackIKRelMimicEnvCfg
+
 
 ##
 # Inverse Kinematics - Relative Pose Control
@@ -16,6 +20,15 @@ gym.register(
     entry_point=f"{__name__}.franka_stack_ik_rel_mimic_env:FrankaCubeStackIKRelMimicEnv",
     kwargs={
         "env_cfg_entry_point": f"{__name__}.franka_stack_ik_rel_mimic_env_cfg:FrankaCubeStackIKRelMimicEnvCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="Isaac-Stack-Cube-TM7S-IK-Rel-Mimic-v0",
+    entry_point="isaaclab_mimic.envs:TM7SCubeStackIKRelMimicEnv",
+    kwargs={
+        "env_cfg_entry_point": tm7s_stack_ik_rel_mimic_env_cfg.TM7SCubeStackIKRelMimicEnvCfg,
     },
     disable_env_checker=True,
 )

@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -86,7 +86,18 @@ class ObservationsCfg:
         cube_orientations = ObsTerm(func=mdp.cube_orientations_in_world_frame)
         eef_pos = ObsTerm(func=mdp.ee_frame_pos)
         eef_quat = ObsTerm(func=mdp.ee_frame_quat)
-        gripper_pos = ObsTerm(func=mdp.gripper_pos)
+        
+        ### New add ###
+        gripper_pos = ObsTerm(
+            func=mdp.tm7s_gripper_pos,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "drive_joint_name": "robotiq_85_left_knuckle_joint",
+                "open_q": 0.0,
+                "close_q": 0.35,
+            },
+        )
+        # gripper_pos = ObsTerm(func=mdp.gripper_pos)
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -110,6 +121,8 @@ class ObservationsCfg:
                 "robot_cfg": SceneEntityCfg("robot"),
                 "ee_frame_cfg": SceneEntityCfg("ee_frame"),
                 "object_cfg": SceneEntityCfg("cube_2"),
+                "ee_target_idx": 1,          # robotiq_grasp_frame
+                "diff_threshold": 0.08,      # 建議先放寬一點，之後再縮
             },
         )
         stack_1 = ObsTerm(
@@ -126,12 +139,47 @@ class ObservationsCfg:
                 "robot_cfg": SceneEntityCfg("robot"),
                 "ee_frame_cfg": SceneEntityCfg("ee_frame"),
                 "object_cfg": SceneEntityCfg("cube_3"),
+                "ee_target_idx": 1,          # robotiq_grasp_frame
+                "diff_threshold": 0.08,      # 建議先放寬一點，之後再縮
             },
         )
 
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = False
+    
+    # @configclass
+    # class SubtaskCfg(ObsGroup):
+    #     """Observations for subtask group."""
+
+    #     grasp_1 = ObsTerm(
+    #         func=mdp.object_grasped,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg("robot"),
+    #             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+    #             "object_cfg": SceneEntityCfg("cube_2"),
+    #         },
+    #     )
+    #     stack_1 = ObsTerm(
+    #         func=mdp.object_stacked,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg("robot"),
+    #             "upper_object_cfg": SceneEntityCfg("cube_2"),
+    #             "lower_object_cfg": SceneEntityCfg("cube_1"),
+    #         },
+    #     )
+    #     grasp_2 = ObsTerm(
+    #         func=mdp.object_grasped,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg("robot"),
+    #             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+    #             "object_cfg": SceneEntityCfg("cube_3"),
+    #         },
+    #     )
+
+    #     def __post_init__(self):
+    #         self.enable_corruption = False
+    #         self.concatenate_terms = False
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()

@@ -1,13 +1,12 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
-
 import torch
+from typing import TYPE_CHECKING, Literal
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject, RigidObjectCollection
@@ -257,7 +256,7 @@ def ee_frame_quat(env: ManagerBasedRLEnv, ee_frame_cfg: SceneEntityCfg = SceneEn
 
     return ee_frame_quat
 
-
+### New add ###
 def gripper_pos(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -281,85 +280,60 @@ def gripper_pos(
     else:
         if hasattr(env.cfg, "gripper_joint_names"):
             gripper_joint_ids, _ = robot.find_joints(env.cfg.gripper_joint_names)
-            assert len(gripper_joint_ids) == 2, "Observation gripper_pos only support parallel gripper for now"
-            finger_joint_1 = robot.data.joint_pos[:, gripper_joint_ids[0]].clone().unsqueeze(1)
-            finger_joint_2 = -1 * robot.data.joint_pos[:, gripper_joint_ids[1]].clone().unsqueeze(1)
-            return torch.cat((finger_joint_1, finger_joint_2), dim=1)
+            # allow 1 (single drive) or 2 (parallel)
+            if len(gripper_joint_ids) == 1:
+                # return (N,1) normalized to [0,1] if you have close/open range
+                # simplest: just return raw joint pos (N,1)
+                q = robot.data.joint_pos[:, gripper_joint_ids[0]].clone().unsqueeze(1)
+                return q
+
+            elif len(gripper_joint_ids) == 2:
+                finger_joint_1 = robot.data.joint_pos[:, gripper_joint_ids[0]].clone().unsqueeze(1)
+                finger_joint_2 = -1 * robot.data.joint_pos[:, gripper_joint_ids[1]].clone().unsqueeze(1)
+                return torch.cat((finger_joint_1, finger_joint_2), dim=1)
+
+            else:
+                raise RuntimeError(
+                    f"Observation gripper_pos expects 1 or 2 gripper joints, got {len(gripper_joint_ids)}"
+                )
         else:
             raise NotImplementedError("[Error] Cannot find gripper_joint_names in the environment config")
 
 
-def gripper_drive_joint_pos(
-    env: ManagerBasedRLEnv,
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    drive_joint_name: str = "",
-) -> torch.Tensor:
-    """Return the position of a single gripper drive joint.
-
-    This is useful for grippers where a single joint command drives the finger motion
-    (e.g., a knuckle joint). The returned tensor has shape (num_envs, 1).
-    """
-
-    if not drive_joint_name:
-        raise ValueError("drive_joint_name must be provided")
-
-    robot: Articulation = env.scene[robot_cfg.name]
-    joint_ids, _ = robot.find_joints([drive_joint_name])
-    if len(joint_ids) != 1:
-        raise ValueError(
-            f"Expected exactly one joint match for drive_joint_name='{drive_joint_name}', got {len(joint_ids)}"
-        )
-    return robot.data.joint_pos[:, joint_ids[0]].clone().unsqueeze(1)
-
-
+### New add ###
 def object_grasped(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
     ee_frame_cfg: SceneEntityCfg,
     object_cfg: SceneEntityCfg,
     diff_threshold: float = 0.06,
-    ee_target_idx: int = 0,
+    ee_target_idx: int = 0,   # 新增：用哪個 target frame
 ) -> torch.Tensor:
-    """Check if an object is grasped by the specified robot.
-
-    Args:
-        env: The environment.
-        robot_cfg: Robot scene entity config.
-        ee_frame_cfg: End-effector frame transformer config.
-        object_cfg: Object to check if grasped.
-        diff_threshold: Distance threshold between EE and object to consider "close".
-        ee_target_idx: Which target frame index to use from the FrameTransformer (default 0).
-
-    Returns:
-        Boolean tensor of shape (num_envs,) indicating if object is grasped.
-    """
 
     robot: Articulation = env.scene[robot_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     obj: RigidObject = env.scene[object_cfg.name]
 
     object_pos = obj.data.root_pos_w
-    end_effector_pos = ee_frame.data.target_pos_w[:, ee_target_idx, :]
-    pose_diff = torch.linalg.vector_norm(object_pos - end_effector_pos, dim=1)
+    ee_pos = ee_frame.data.target_pos_w[:, ee_target_idx, :]  # <- 改這裡
+    pose_diff = torch.linalg.vector_norm(object_pos - ee_pos, dim=1)
 
+    # suction cup
     if hasattr(env.scene, "surface_grippers") and len(env.scene.surface_grippers) > 0:
         surface_gripper = env.scene.surface_grippers["surface_gripper"]
-        suction_cup_status = surface_gripper.state.view(-1, 1)  # 1: closed, 0: closing, -1: open
-        suction_cup_is_closed = (suction_cup_status == 1).to(torch.float32)
-        grasped = torch.logical_and(suction_cup_is_closed, pose_diff < diff_threshold)
+        suction_cup_is_closed = (surface_gripper.state == 1)
+        return suction_cup_is_closed & (pose_diff < diff_threshold)
 
-    else:
-        if hasattr(env.cfg, "gripper_joint_names"):
-            gripper_joint_ids, _ = robot.find_joints(env.cfg.gripper_joint_names)
-            closed = _tm7s_like_gripper_closed_mask(env, robot, gripper_joint_ids)
-            grasped = (pose_diff < diff_threshold) & closed
-        else:
-            raise ValueError("No gripper_joint_names found in env.cfg")
+    # joint gripper
+    if not hasattr(env.cfg, "gripper_joint_names"):
+        raise ValueError("No gripper_joint_names found in env.cfg")
 
-    return grasped
+    gripper_joint_ids, _ = robot.find_joints(env.cfg.gripper_joint_names)
+    closed = _tm7s_like_gripper_closed_mask(env, robot, gripper_joint_ids)
+    return (pose_diff < diff_threshold) & closed
 
 
-
+## New add ###
 def object_stacked(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
@@ -390,7 +364,7 @@ def object_stacked(
     else:
         if hasattr(env.cfg, "gripper_joint_names"):
             gripper_joint_ids, _ = robot.find_joints(env.cfg.gripper_joint_names)
-            is_open = _tm7s_like_gripper_open_mask(env, robot, gripper_joint_ids)
+            is_open = _tm7s_like_gripper_open_mask(env, robot, gripper_joint_ids, atol=1e-4, rtol=1e-4)
             stacked = torch.logical_and(is_open, stacked)
         else:
             raise ValueError("No gripper_joint_names found in environment config")
@@ -441,7 +415,7 @@ def cube_poses_in_base_frame(
         return pos_cubes_base
     elif return_key == "quat":
         return quat_cubes_base
-    else:
+    elif return_key is None:
         return torch.cat((pos_cubes_base, quat_cubes_base), dim=1)
 
 
@@ -454,8 +428,7 @@ def object_abs_obs_in_base_frame(
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
     """
-    Object Abs observations (in base frame): remove the relative observations,
-    and add abs gripper pos and quat in robot base frame
+    Object Abs observations (in base frame): remove the relative observations, and add abs gripper pos and quat in robot base frame
         cube_1 pos,
         cube_1 quat,
         cube_2 pos,
@@ -536,37 +509,51 @@ def ee_frame_pose_in_base_frame(
         return ee_pos_in_base
     elif return_key == "quat":
         return ee_quat_in_base
-    else:
+    elif return_key is None:
         return torch.cat((ee_pos_in_base, ee_quat_in_base), dim=1)
 
 
+### New add ###
+def gripper_drive_joint_pos(env, robot_cfg: SceneEntityCfg, drive_joint_name: str):
+    """Gripper position for mimic grippers (e.g., Robotiq85) using a single drive joint.
+
+    Returns:
+        torch.Tensor: shape (num_envs, 1)
+    """
+    robot = env.scene[robot_cfg.name]
+
+    # 一定用 list，避免 regex 模糊匹配
+    joint_ids, joint_names = robot.find_joints([drive_joint_name])
+    if len(joint_ids) != 1:
+        raise RuntimeError(
+            f"Expected exactly 1 joint for '{drive_joint_name}', "
+            f"got {len(joint_ids)}: {joint_names}"
+        )
+
+    j = joint_ids[0]   # ←←← 这一行一定要存在
+
+    q = robot.data.joint_pos[:, j].unsqueeze(-1)
+    return q
+
+
 def tm7s_gripper_pos(
-    env: ManagerBasedRLEnv,
+    env,
     env_ids=None,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     drive_joint_name: str = "robotiq_85_left_knuckle_joint",
     open_q: float = 0.0,
     close_q: float = 0.35,
-) -> torch.Tensor:
+):
     """Return a 1D gripper state in [0, 1] using the Robotiq85 drive joint position.
 
     - 0.0: open
     - 1.0: close
-
-    Args:
-        env: The environment.
-        env_ids: Environment indices (None means all envs).
-        robot_cfg: Robot scene entity config.
-        drive_joint_name: Name of the single drive joint for the gripper.
-        open_q: Joint position when gripper is fully open.
-        close_q: Joint position when gripper is fully closed.
-
-    Returns:
-        Tensor of shape (num_envs, 1) with normalized gripper state [0, 1].
     """
-    robot: Articulation = env.scene[robot_cfg.name]
+    robot = env.scene[robot_cfg.name]
 
+    # env_ids handling
     if env_ids is None:
+        # most obs terms in Isaac Lab call with env_ids=None meaning "all envs"
         env_ids = slice(None)
 
     joint_ids, _ = robot.find_joints([drive_joint_name])
@@ -581,22 +568,23 @@ def tm7s_gripper_pos(
     g = (q - open_q) / denom
     return torch.clamp(g, 0.0, 1.0)
 
-
 def _tm7s_like_gripper_closed_mask(
-    env: ManagerBasedRLEnv,
+    env,
     robot: Articulation,
     gripper_joint_ids: list[int],
 ) -> torch.Tensor:
-    """Return (num_envs,) bool tensor: gripper is considered closed (not open)."""
+    """Return (num_envs,) bool tensor: gripper is considered closed (or not-open)."""
+    # 约定：cfg 里给的是 open 时的 joint 值 + threshold
     open_val = torch.tensor(env.cfg.gripper_open_val, dtype=torch.float32, device=env.device)
     thr = float(env.cfg.gripper_threshold)
 
-    # Single drive joint
+    # 单驱动关节：用 drive joint 是否偏离 open_val 判断
     if len(gripper_joint_ids) == 1:
         q = robot.data.joint_pos[:, gripper_joint_ids[0]]
         return q > (open_val + thr)
+        # 先確認方向：Robotiq 左 knuckle 關閉時通常是 q 變大, 如果你實測是「closing 反而 q 變小」，就改成 < open_val - thr
 
-    # Parallel gripper (2 joints)
+    # 平行夹爪：两指都要偏离 open_val
     if len(gripper_joint_ids) == 2:
         q0 = robot.data.joint_pos[:, gripper_joint_ids[0]]
         q1 = robot.data.joint_pos[:, gripper_joint_ids[1]]
@@ -609,7 +597,7 @@ def _tm7s_like_gripper_closed_mask(
 
 
 def _tm7s_like_gripper_open_mask(
-    env: ManagerBasedRLEnv,
+    env,
     robot: Articulation,
     gripper_joint_ids: list[int],
     atol: float = 1e-4,
@@ -618,12 +606,13 @@ def _tm7s_like_gripper_open_mask(
     """Return (num_envs,) bool tensor: gripper is considered open."""
     open_val = torch.tensor(env.cfg.gripper_open_val, dtype=torch.float32, device=env.device)
 
-    # Single drive joint
+    # if len(gripper_joint_ids) == 1:
+    #     q = robot.data.joint_pos[:, gripper_joint_ids[0]]
+    #     return torch.isclose(q, open_val, atol=atol, rtol=rtol)
     if len(gripper_joint_ids) == 1:
         q = robot.data.joint_pos[:, gripper_joint_ids[0]]
         return torch.abs(q - open_val) < 1e-2
 
-    # Parallel gripper (2 joints)
     if len(gripper_joint_ids) == 2:
         q0 = robot.data.joint_pos[:, gripper_joint_ids[0]]
         q1 = robot.data.joint_pos[:, gripper_joint_ids[1]]

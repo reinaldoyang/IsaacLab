@@ -135,7 +135,7 @@ FRANKA_ROBOTIQ_GRIPPER_CFG.actuators = {
     ),
     # set PD to zero for passive joints in close-loop gripper
     "gripper_passive": ImplicitActuatorCfg(
-        joint_names_expr=[".*_inner_finger_knuckle_joint", "right_outer_knuckle_joint"],
+        joint_names_expr=["left_inner_finger_knuckle_joint", "right_inner_finger_knuckle_joint"],
         effort_limit_sim=1.0,
         velocity_limit_sim=10.0,
         stiffness=0.0,

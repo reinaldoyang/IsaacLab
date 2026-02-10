@@ -97,7 +97,14 @@ def rollout(policy, env, success_term, horizon, device):
         # Prepare observations
         obs = copy.deepcopy(obs_dict["policy"])
         for ob in obs:
-            obs[ob] = torch.squeeze(obs[ob])
+            # Only squeeze the batch dimension (dim=0), keep feature dimensions
+            obs[ob] = obs[ob].squeeze(0)
+
+        # Debug: print observation shapes on first step
+        if i == 0:
+            print("\n[DEBUG] Observation shapes after squeeze:")
+            for k, v in obs.items():
+                print(f"  {k}: shape = {v.shape}")
 
         # Check if environment image observations
         if hasattr(env.cfg, "image_obs_list"):

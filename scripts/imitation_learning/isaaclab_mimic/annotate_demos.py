@@ -40,6 +40,18 @@ parser.add_argument(
     default=False,
     help="Enable annotating start points of subtasks.",
 )
+parser.add_argument(
+    "--debug_gripper",
+    action="store_true",
+    default=False,
+    help="Print gripper joint names/positions and subtask signals during replay.",
+)
+parser.add_argument(
+    "--debug_gripper_every",
+    type=int,
+    default=50,
+    help="Print debug gripper info every N environment steps (only if --debug_gripper).",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -358,6 +370,26 @@ def replay_episode(
     env.sim.reset()
     env.recorder_manager.reset()
     env.reset_to(initial_state, None, is_relative=True)
+
+    if args_cli.debug_gripper:
+        try:
+            robot = env.scene["robot"]
+            print("\n[debug_gripper] cfg.gripper_joint_names =", getattr(env.cfg, "gripper_joint_names", None))
+            print("[debug_gripper] cfg.gripper_open_val    =", getattr(env.cfg, "gripper_open_val", None))
+            print("[debug_gripper] cfg.gripper_close_val   =", getattr(env.cfg, "gripper_close_val", None))
+            print("[debug_gripper] cfg.gripper_threshold   =", getattr(env.cfg, "gripper_threshold", None))
+            if hasattr(env.cfg, "gripper_joint_names"):
+                ids, names = robot.find_joints(env.cfg.gripper_joint_names)
+                print("[debug_gripper] resolved_joint_ids    =", ids)
+                print("[debug_gripper] resolved_joint_names  =", names)
+                if len(ids) > 0:
+                    print(
+                        "[debug_gripper] joint_pos(init)       =",
+                        robot.data.joint_pos[0, ids].detach().cpu().tolist(),
+                    )
+        except Exception as exc:
+            print(f"[debug_gripper] failed to query robot joints: {exc}")
+
     first_action = True
     for action_index, action in enumerate(actions):
         current_action_index = action_index
@@ -371,6 +403,25 @@ def replay_episode(
                 continue
         action_tensor = torch.Tensor(action).reshape([1, action.shape[0]])
         env.step(torch.Tensor(action_tensor))
+
+        if args_cli.debug_gripper and args_cli.debug_gripper_every > 0:
+            if action_index % args_cli.debug_gripper_every == 0 or action_index == len(actions) - 1:
+                try:
+                    robot = env.scene["robot"]
+                    ids, names = ([], [])
+                    if hasattr(env.cfg, "gripper_joint_names"):
+                        ids, names = robot.find_joints(env.cfg.gripper_joint_names)
+                    joint_pos = robot.data.joint_pos[0, ids].detach().cpu().tolist() if len(ids) > 0 else None
+                    signals = env.get_subtask_term_signals()
+                    grasp_1 = bool(signals.get("grasp_1", torch.tensor([0]))[0].item())
+                    stack_1 = bool(signals.get("stack_1", torch.tensor([0]))[0].item())
+                    grasp_2 = bool(signals.get("grasp_2", torch.tensor([0]))[0].item())
+                    print(
+                        f"[debug_gripper] step={action_index:04d} names={names} joint_pos={joint_pos} "
+                        f"signals(grasp_1,stack_1,grasp_2)=({grasp_1},{stack_1},{grasp_2})"
+                    )
+                except Exception as exc:
+                    print(f"[debug_gripper] failed at step {action_index}: {exc}")
     if success_term is not None:
         if not bool(success_term.func(env, **success_term.params)[0]):
             return False

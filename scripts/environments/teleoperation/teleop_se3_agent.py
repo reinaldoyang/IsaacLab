@@ -71,6 +71,16 @@ from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 
 import isaaclab_tasks  # noqa: F401
+print("[DEBUG] ===== REGISTERED GYM TASKS =====")
+for env_id in gym.envs.registry.keys():
+    if "TM7S" in env_id or "Plate" in env_id:
+        print(f"[DEBUG] Found: {env_id}")
+print("[DEBUG] All registered tasks containing 'Isaac':")
+for env_id in gym.envs.registry.keys():
+    if "Isaac" in env_id:
+        print(f"[DEBUG]   {env_id}")
+print("[DEBUG] ================================")
+
 from isaaclab_tasks.manager_based.manipulation.lift import mdp
 from isaaclab_tasks.utils import parse_env_cfg
 
@@ -115,6 +125,27 @@ def main() -> None:
     try:
         # create environment
         env = gym.make(args_cli.task, cfg=env_cfg).unwrapped
+        # DEBUG: print robot metadata right after env creation
+        try:
+            robot = env.scene["robot"]
+            print("=" * 60)
+            print("[DEBUG] ===== ROBOT METADATA =====")
+            print(f"[DEBUG] robot.num_joints: {robot.num_joints}")
+            print(f"[DEBUG] robot.joint_names: {robot.joint_names}")
+            print(f"[DEBUG] robot.num_bodies: {robot.num_bodies}")
+            print(f"[DEBUG] robot.body_names: {robot.body_names}")
+            print(f"[DEBUG] robot.data.joint_pos.shape: {robot.data.joint_pos.shape}")
+            print(f"[DEBUG] robot.data.joint_pos: {robot.data.joint_pos}")
+            print(f"[DEBUG] robot.data.joint_names: {robot.data.joint_names}")
+            print("Initial joint positions (all 12 joints):", robot.data.joint_pos[0])
+            # Print actuator info
+            print("[DEBUG] ===== ACTUATORS =====")
+            for name, actuator in robot.actuators.items():
+                print(f"[DEBUG]   actuator '{name}': joint_names={actuator.joint_names}, num_joints={actuator.num_joints}")
+        except Exception as dbg_e:
+            import traceback
+            print("[DEBUG] failed to print robot metadata:", dbg_e)
+            traceback.print_exc()
         # check environment name (for reach , we don't allow the gripper)
         if "Reach" in args_cli.task:
             logger.warning(
@@ -201,7 +232,7 @@ def main() -> None:
             sensitivity = args_cli.sensitivity
             if args_cli.teleop_device.lower() == "keyboard":
                 teleop_interface = Se3Keyboard(
-                    Se3KeyboardCfg(pos_sensitivity=0.05 * sensitivity, rot_sensitivity=0.05 * sensitivity)
+                    Se3KeyboardCfg(pos_sensitivity=0.02 * sensitivity, rot_sensitivity=0.02 * sensitivity)
                 )
             elif args_cli.teleop_device.lower() == "spacemouse":
                 teleop_interface = Se3SpaceMouse(
@@ -251,6 +282,9 @@ def main() -> None:
             with torch.inference_mode():
                 # get device command
                 action = teleop_interface.advance()
+                # print(f"[DEBUG] Commanded action (pose delta): {action}")
+                # print(f"[DEBUG] Action shape: {action.shape}")
+                # print(f"[DEBUG] Action norm: {torch.norm(action):.6f}")
 
                 # Only apply teleop commands when active
                 if teleoperation_active:
